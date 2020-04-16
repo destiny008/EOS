@@ -34,9 +34,28 @@ tp群中有成员反映，自己购买的一个账户，在变更私钥后仍旧
 
 #### 3. 同步
 在确认了这个问题后，我们第一时间个block.one进行了同步，而block.one其实很早就已经知道此问题，是2018年19月份在githab上提交的，
-https://github.com/EOSIO/eosio.contracts/issues/53
-在githab的问题页面有提出有方法可以避免该问题发生，就是在账户交易完成后立即调用`multisig::invalidate()`这个方法，可以将此账户移除处已经审核通过但是尚未被执行的多签提案中，从而避免上述问题。
 
+https://github.com/EOSIO/eosio.contracts/issues/53
+
+在githab的问题页面有提出有方法可以避免该问题发生，就是在账户交易完成后立即调用`multisig::invalidate()`这个方法，可以将此账户移除处已经审核通过但是尚未被执行的多签提案中，从而避免上述问题。从代码可以看出，调用`multisig::invalidate()`后会将账户和当前时间添加到`inv_table`表中。
+```c++
+void multisig::invalidate( name account ) {
+   require_auth( account );
+   invalidations inv_table( get_self(), get_self().value );
+   auto it = inv_table.find( account.value );
+   if ( it == inv_table.end() ) {
+      inv_table.emplace( account, [&](auto& i) {
+            i.account = account;
+            i.last_invalidation_time = current_time_point();
+         });
+   } else {
+      inv_table.modify( it, account, [&](auto& i) {
+            i.last_invalidation_time = current_time_point();
+         });
+   }
+}
+```
+一旦`multisig::exec()`执行的时候，会在`inv_table`中确认审核人的账户是否存在于`inv_table`表中，或者审核人审核的时间是否大于`invalidate()`。一旦审核人信息不存在表中或者审核人调用`invalidate()`的时间早于审核的时间，则都会认同此次审核人的权限成立而使此次提案被成功执行。
 ```c++
    if ( apps_it != apptable.end() ) {
       approvals.reserve( apps_it->provided_approvals.size() );
